@@ -1,7 +1,7 @@
 /*
  * Project Group 4 SEMI - Dual-Axis Solar Tracker
  * Hardware: Arduino Uno R3, 2 Servos (LR = Continuous, UD = Standard), 4 LDRs
- * Features: Auto Sweep (LR) + Light Track (UD), Manual Mode, Excel Data Logging
+ * Features: Automatic Mode (Flowchart-based), Manual Mode, Excel Data Logging
  */
 
 #include <Servo.h>
@@ -22,9 +22,14 @@
 #define BTN_AXIS_PIN 11 // Switch between LR/UD Servo in Manual
 
 // --- Constants & Configuration ---
-#define TOLERANCE 10    
-#define NIGHT_LIMIT 8   
+#define TOLERANCE 10    // Value from flowchart
+#define NIGHT_LIMIT 8   // Value from flowchart
 #define LOAD_RESISTANCE 10.0 
+
+// Speeds for Continuous Servo (90 is Stop)
+#define LR_SPEED_RIGHT 80 // Move Right (Adjust for speed)
+#define LR_SPEED_LEFT 100 // Move Left (Adjust for speed)
+#define LR_STOP 90
 
 Servo servoLR; // Continuous Rotation Servo
 Servo servoUD; // Standard Servo
@@ -34,11 +39,6 @@ bool isAutoMode = true;
 bool manualControlLR = true; 
 
 int posUD = 45; // Initial position for UD
-
-// Variables for Continuous Servo Timing
-unsigned long lastSweepTime = 0;
-bool spinningClockwise = true;
-const long sweepInterval = 1800; // 2 Seconds
 
 // Button State Tracking
 int lastBtnModeState = HIGH;
@@ -56,7 +56,7 @@ void setup() {
   pinMode(BTN_AXIS_PIN, INPUT_PULLUP);
   
   // Initial positions
-  servoLR.write(90); // 90 = STOP for continuous servo
+  servoLR.write(LR_STOP); 
   servoUD.write(posUD);
   
   delay(500);
@@ -67,10 +67,7 @@ void loop() {
   int btnModeState = digitalRead(BTN_MODE_PIN);
   if (btnModeState == LOW && lastBtnModeState == HIGH) {
     isAutoMode = !isAutoMode; 
-    
-    // Safety: Stop continuous servo immediately when switching modes
-    servoLR.write(90); 
-    
+    servoLR.write(LR_STOP); // Safety stop
     delay(200); 
   }
   lastBtnModeState = btnModeState;
@@ -85,66 +82,74 @@ void loop() {
   // --- 3. Data Logging to Excel ---
   logDataToExcel();
   
-  delay(50); // Reduced delay for better responsiveness
+  delay(50); 
 }
 
-// --- Automatic Mode Logic ---
+// --- Automatic Mode Logic based on Flowchart ---
 void runAutomaticMode() {
-  // ------------------------------------------
-  // PART A: Left-Right (Azimuth) - TIME SWEEP
-  // ------------------------------------------
-  unsigned long currentMillis = millis();
+  // 1. Read the analog value from each LDR sensor
+  int topleft = analogRead(LDR_TL_PIN);
+  int topright = analogRead(LDR_TR_PIN);
+  int botleft = analogRead(LDR_BL_PIN);
+  int botright = analogRead(LDR_BR_PIN);
 
-  // Check if 2 seconds have passed
-  if (currentMillis - lastSweepTime >= sweepInterval) {
-    lastSweepTime = currentMillis;       // Save time
-    spinningClockwise = !spinningClockwise; // Toggle direction
+  // 2. Calculate the average values
+  int avgtop = (topright + topleft) / 2;
+  int avgbot = (botright + botleft) / 2;
+  int avgright = (topright + botright) / 2;
+  int avgleft = (topleft + botleft) / 2;
+
+  // 3. Calculate the differences (Azimuth & elevation)
+  int diffelev = avgtop - avgbot;
+  int diffazi = avgright - avgleft;
+  int avgsum = (avgtop + avgbot + avgright + avgleft) / 4;
+
+  // 4. Check Night Mode (avgsum < 8)
+  if (avgsum < NIGHT_LIMIT) {
+    // "Rotate the Servo Motors to the initial position"
+    servoLR.write(LR_STOP); // Stop LR servo
+    posUD = 30;             // Set UD to sunrise/horizon position
+    servoUD.write(posUD);
+    return; // Go back to Start
   }
 
-  // NOTE: For Continuous Servos:
-  // 0   = Full speed Clockwise
-  // 90  = Stop
-  // 180 = Full speed Counter-Clockwise
-  // (Adjust 0/180 or speed if direction is reversed for your wiring)
-  
-  if (spinningClockwise) {
-    servoLR.write(111); // Rotate CW
-  } else {
-    servoLR.write(73);   // Rotate CCW
-  }
-
-  // ------------------------------------------
-  // PART B: Up-Down (Elevation) - LIGHT TRACKING (Unchanged)
-  // ------------------------------------------
-  int tl = analogRead(LDR_TL_PIN);
-  int tr = analogRead(LDR_TR_PIN);
-  int bl = analogRead(LDR_BL_PIN);
-  int br = analogRead(LDR_BR_PIN);
-
-  int avgTop = (tl + tr) / 2;
-  int avgBot = (bl + br) / 2;
-  int avgSum = (avgTop + avgBot + (tl + bl)/2 + (tr + br)/2) / 4;
-
-  // Night Mode Check
-  if (avgSum < NIGHT_LIMIT) {
-    servoUD.write(30); // Return to horizon
-    // We do NOT stop LR sweep based on night mode based on your request, 
-    // but if you want it to stop at night, add logic here.
-    return;
-  }
-
-  int diffElev = avgTop - avgBot;
-
-  if (abs(diffElev) > TOLERANCE) {
-    if (diffElev > 0) {
-      posUD = posUD + 1; // Move Up
+  // 5. Azimuth (Left-Right) Control
+  // Check |diffazi| <= 10
+  if (abs(diffazi) <= TOLERANCE) {
+    // "Stop the Left-Right Servo Motor"
+    servoLR.write(LR_STOP);
+  } 
+  else {
+    // Check diffazi > 0
+    if (diffazi > 0) {
+      // "Left-Right Servo Motor move PV panel Right"
+      servoLR.write(LR_SPEED_RIGHT); 
     } else {
-      posUD = posUD - 1; // Move Down
+      // "Left-Right Servo Motor move PV panel Left"
+      servoLR.write(LR_SPEED_LEFT);
     }
   }
-  
-  posUD = constrain(posUD, 0, 180);
-  servoUD.write(posUD);
+
+  // 6. Elevation (Up-Down) Control
+  // Check |diffelev| <= 10
+  if (abs(diffelev) <= TOLERANCE) {
+    // "Stop the Up-Down Servo Motor"
+    // Do nothing (position doesn't change)
+  } 
+  else {
+    // Check diffelev > 0
+    if (diffelev > 0) {
+      // "Up-Down Servo Motor move PV panel Up"
+      posUD = posUD + 1;
+    } else {
+      // "Up-Down Servo Motor move PV panel Down"
+      posUD = posUD - 1;
+    }
+    // Write the new position for the standard servo
+    posUD = constrain(posUD, 0, 180);
+    servoUD.write(posUD);
+  }
+  // The logic then goes back to Start
 }
 
 // --- Manual Mode Logic ---
@@ -152,8 +157,7 @@ void runManualMode() {
   int btnAxisState = digitalRead(BTN_AXIS_PIN);
   if (btnAxisState == LOW && lastBtnAxisState == HIGH) {
     manualControlLR = !manualControlLR; 
-    // Stop continuous servo when switching control to other axis
-    servoLR.write(90); 
+    servoLR.write(LR_STOP); // Stop when switching axis
     delay(200);
   }
   lastBtnAxisState = btnAxisState;
@@ -162,11 +166,10 @@ void runManualMode() {
   int angle = map(potVal, 0, 1023, 0, 180);
 
   if (manualControlLR) {
-    // For Continuous Servo: 
-    // angle < 90 (CW), angle 90 (Stop), angle > 90 (CCW)
+    // Potentiometer controls speed/direction of continuous servo
     servoLR.write(angle); 
   } else {
-    // For Standard Servo: Moves to position
+    // Potentiometer controls position of standard servo
     servoUD.write(angle);
     posUD = angle;
   }
