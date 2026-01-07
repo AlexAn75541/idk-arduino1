@@ -24,7 +24,7 @@
 // --- Constants & Configuration ---
 #define TOLERANCE 10           // Defines the tolerance threshold (±10) for light difference before servo movement is triggered
 #define NIGHT_LIMIT 8          // Defines the minimum average light level; below this value, night mode activates
-#define LOAD_RESISTANCE 10.0  // Defines the load resistance value (10 ohms) used for current calculation
+#define LOAD_RESISTANCE 10.0 // Defines the load resistance value (10 ohms) used for current calculation
 
 // Speeds for Continuous Servo (90 is Stop)
 #define LR_SPEED_RIGHT 80       // Defines the speed value to rotate the LR servo to the right (values < 90 move one direction)
