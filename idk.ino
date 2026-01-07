@@ -184,7 +184,7 @@ void logDataToExcel() {                                   // Function that calcu
 
   Serial.print("DATA,TIME,");               // Sends data prefix and TIME keyword (PLX-DAQ inserts timestamp)
   if (isAutoMode) Serial.print("Auto");     // If in Auto mode, prints "Auto" to the serial output
-  else Serial.print("Manual");             // If in Manual mode, prints "Manual" to the serial output
+  else Serial.print("Manual");              // If in Manual mode, prints "Manual" to the serial output
   Serial.print(",");                        // Prints a comma delimiter for CSV formatting
   Serial.print(voltage);                    // Prints the calculated voltage value
   Serial.print(",");                        // Prints a comma delimiter for CSV formatting
