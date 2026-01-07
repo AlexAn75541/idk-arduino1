@@ -1,5 +1,5 @@
 /*
- * Project Group 4 SEMI - Solar Tracker                              
+ * Project Group 4 SEMI - Solar Tracker
  * Hardware: Arduino Uno R3, 2 servo motors, 4 light sensors
  * Features: Automatic Mode, Manual Mode, Excel Data Logging
  */
