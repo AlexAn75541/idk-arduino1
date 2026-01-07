@@ -189,6 +189,6 @@ void logDataToExcel() {                                   // Function that calcu
   Serial.print(voltage);                    // Prints the calculated voltage value
   Serial.print(",");                        // Prints a comma delimiter for CSV formatting
   Serial.print(current);                    // Prints the calculated current value in milliamps
-  Serial.print(",");                       // Prints a comma delimiter for CSV formatting
+  Serial.print(",");                        // Prints a comma delimiter for CSV formatting
   Serial.println(power);                    // Prints the calculated power value and ends the line
 }
