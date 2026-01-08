@@ -1,194 +1,197 @@
 /*
- * Project Group 4 SEMI - Solar Tracker
- * Hardware: Arduino Uno R3, 2 servo motors, 4 light sensors
- * Features: Automatic Mode, Manual Mode, Excel Data Logging
+ * Solar Tracker - Group 4 SEMI
+ * Bộ Theo Dõi Mặt Trời - Nhóm 4 SEMI
+ * Hardware: Arduino Uno R3, 2 servos, 4 LDRs
+ * Phần cứng: Arduino Uno R3, 2 servo, 4 cảm biến ánh sáng
+ * Modes: Auto tracking, Manual control, Excel logging
+ * Chế độ: Tự động theo dõi, Điều khiển thủ công, Ghi dữ liệu Excel(đã được lược bỏ)
  */
 
-#include <Servo.h>            // Includes the Servo library to control servo motors
+#include <Servo.h>
 
 // --- Pin Definitions ---
-#define LDR_TL_PIN A0          // Defines analog pin A0 for the Top-Left Light Dependent Resistor (LDR) sensor
-#define LDR_TR_PIN A1          // Defines analog pin A1 for the Top-Right LDR sensor
-#define LDR_BL_PIN A2          // Defines analog pin A2 for the Bottom-Left LDR sensor
-#define LDR_BR_PIN A3          // Defines analog pin A3 for the Bottom-Right LDR sensor
+// --- Định nghĩa chân ---
+#define LDR_TL_PIN A0          // Top-Left LDR / Cảm biến trên-trái
+#define LDR_TR_PIN A1          // Top-Right LDR / Cảm biến trên-phải
+#define LDR_BL_PIN A2          // Bottom-Left LDR / Cảm biến dưới-trái
+#define LDR_BR_PIN A3          // Bottom-Right LDR / Cảm biến dưới-phải
 
-#define POT_PIN A4             // Defines analog pin A4 for the potentiometer used in manual control mode
-#define VOLT_PIN A5            // Defines analog pin A5 for reading the solar panel voltage through a voltage divider
+#define POT_PIN A4             // Potentiometer for manual control / Biến trở điều khiển thủ công
+#define VOLT_PIN A5            // Solar panel voltage sensor / Cảm biến điện áp pin mặt trời
 
-#define SERVO_LR_PIN 6         // Defines digital pin 6 for the Left-Right servo motor (continuous rotation type)
-#define SERVO_UD_PIN 5         // Defines digital pin 5 for the Up-Down servo motor (standard 180-degree type)
+#define SERVO_LR_PIN 6         // Left-Right servo (continuous) / Servo trái-phải (quay liên tục)
+#define SERVO_UD_PIN 5         // Up-Down servo (180°) / Servo lên-xuống (180°)
 
-#define BTN_MODE_PIN 12        // Defines digital pin 12 for the button that switches between Auto and Manual modes
-#define BTN_AXIS_PIN 11        // Defines digital pin 11 for the button that switches between LR and UD servo control in Manual mode
+#define BTN_MODE_PIN 12        // Mode switch button (Auto/Manual) / Nút chuyển chế độ (Tự động/Thủ công)
+#define BTN_AXIS_PIN 11        // Axis switch button (LR/UD in Manual) / Nút chuyển trục (LR/UD khi Thủ công)
 
-// --- Constants & Configuration ---
-#define TOLERANCE 10           // Defines the tolerance threshold (±10) for light difference before servo movement is triggered
-#define NIGHT_LIMIT 8          // Defines the minimum average light level; below this value, night mode activates
-#define LOAD_RESISTANCE 10.0 // Defines the load resistance value (10 ohms) used for current calculation
+// --- Constants ---
+// --- Hằng số ---
+#define TOLERANCE 10           // Light difference threshold for servo movement / Ngưỡng chênh lệch ánh sáng để servo di chuyển
+#define NIGHT_LIMIT 8          // Night mode threshold (low light) / Ngưỡng chế độ đêm (ánh sáng yếu)
+#define LOAD_RESISTANCE 10.0   // Load resistance (10Ω) for current calc / Điện trở tải (10Ω) để tính dòng điện
 
-// Speeds for Continuous Servo (90 is Stop)
-#define LR_SPEED_RIGHT 80       // Defines the speed value to rotate the LR servo to the right (values < 90 move one direction)
-#define LR_SPEED_LEFT 100       // Defines the speed value to rotate the LR servo to the left (values > 90 move opposite direction)
-#define LR_STOP 90              // Defines the value that stops the continuous rotation servo (90 = neutral/stop)
+// Continuous Servo Speeds (90 = stop)
+// Tốc độ Servo liên tục (90 = dừng)
+#define LR_SPEED_RIGHT 80      // Rotate right (<90) / Quay phải (<90)
+#define LR_SPEED_LEFT 100      // Rotate left (>90) / Quay trái (>90)
+#define LR_STOP 90             // Stop position / Vị trí dừng
 
-Servo servoLR;                   // Creates a Servo object named 'servoLR' to control the Left-Right continuous rotation servo
-Servo servoUD;                   // Creates a Servo object named 'servoUD' to control the Up-Down standard servo
+Servo servoLR;                 // Left-Right servo object / Đối tượng servo trái-phải
+Servo servoUD;                 // Up-Down servo object / Đối tượng servo lên-xuống
 
 // --- Variables ---
-bool isAutoMode = true;               // Boolean variable to track current mode; true = Automatic mode, false = Manual mode
-bool manualControlLR = true;          // Boolean variable for manual mode; true = controlling LR servo, false = controlling UD servo
+// --- Biến ---
+bool isAutoMode = true;        // Current mode (true=Auto, false=Manual) / Chế độ hiện tại (true=Tự động, false=Thủ công)
+bool manualControlLR = true;   // Manual axis (true=LR, false=UD) / Trục thủ công (true=LR, false=UD)
 
-int posUD = 45; // Integer variable storing the current position of the Up-Down servo (initialized to 45 degrees)
+int posUD = 45;                // Up-Down servo position / Vị trí servo lên-xuống
 
-// Button State Tracking
-int lastBtnModeState = HIGH;          // Stores the previous state of the mode button (HIGH = not pressed, using INPUT_PULLUP)
-int lastBtnAxisState = HIGH;          // Stores the previous state of the axis button (HIGH = not pressed, using INPUT_PULLUP)
+// Button states for debouncing
+// Trạng thái nút để chống rung
+int lastBtnModeState = HIGH;   // Previous mode button state / Trạng thái nút chế độ trước
+int lastBtnAxisState = HIGH;   // Previous axis button state / Trạng thái nút trục trước
 
-void setup() {                        // setup() function runs once when Arduino starts or resets
-  Serial.begin(9600);                 // Initializes serial communication at 9600 baud rate for data logging
-  Serial.println("CLEARDATA");        // Sends command to PLX-DAQ Excel add-in to clear previous data
-  Serial.println("LABEL,Time,Mode,Voltage(V),Current(mA),Power(mW)");  // Sends column headers to Excel for data logging
+void setup() {
+  Serial.begin(9600);                  // Start serial at 9600 baud / Bắt đầu serial ở tốc độ 9600 baud
+  Serial.println("CLEARDATA");         // Clear Excel data (PLX-DAQ) / Xóa dữ liệu Excel (PLX-DAQ)
+  Serial.println("LABEL,Time,Mode,Voltage(V),Current(mA),Power(mW)");  // Excel headers / Tiêu đề Excel
 
-  servoLR.attach(SERVO_LR_PIN);       // Attaches the servoLR object to pin 6 to enable control of the LR servo
-  servoUD.attach(SERVO_UD_PIN);       // Attaches the servoUD object to pin 5 to enable control of the UD servo
+  servoLR.attach(SERVO_LR_PIN);        // Attach LR servo / Gắn servo LR
+  servoUD.attach(SERVO_UD_PIN);        // Attach UD servo / Gắn servo UD
   
-  pinMode(BTN_MODE_PIN, INPUT_PULLUP); // Sets pin 12 as input with internal pull-up resistor (button reads HIGH when not pressed)
-  pinMode(BTN_AXIS_PIN, INPUT_PULLUP); // Sets pin 11 as input with internal pull-up resistor (button reads HIGH when not pressed)
+  pinMode(BTN_MODE_PIN, INPUT_PULLUP); // Mode button with pullup / Nút chế độ với pullup
+  pinMode(BTN_AXIS_PIN, INPUT_PULLUP); // Axis button with pullup / Nút trục với pullup
   
-  // Initial positions
-  servoLR.write(LR_STOP);             // Sets the LR servo to stop position (90) at startup
-  servoUD.write(posUD);               // Sets the UD servo to its initial position (45 degrees) at startup
+  // Initialize servo positions / Khởi tạo vị trí servo
+  servoLR.write(LR_STOP);              // Stop LR servo / Dừng servo LR
+  servoUD.write(posUD);                // Set UD to 45° / Đặt UD ở 45°
   
-  delay(500);                         // Waits 500 milliseconds to allow servos to reach their initial positions
+  delay(500);                          // Allow servos to reach position / Cho servo về vị trí
 }
 
-void loop() {                         // loop() function runs repeatedly after setup() completes
-  // --- 1. Check Mode Switch Button ---
-  int btnModeState = digitalRead(BTN_MODE_PIN);  // Reads the current state of the mode button (HIGH or LOW)
-  if (btnModeState == LOW && lastBtnModeState == HIGH) {  // Checks if button was just pressed (falling edge detection)
-    isAutoMode = !isAutoMode;         // Toggles between Auto mode and Manual mode
-    servoLR.write(LR_STOP);           // Stops the LR servo for safety when switching modes
-    delay(200);                       // Waits 200ms for button debouncing to prevent multiple toggles
+void loop() {
+  // --- 1. Check Mode Button ---
+  // --- 1. Kiểm tra nút chế độ ---
+  int btnModeState = digitalRead(BTN_MODE_PIN);
+  if (btnModeState == LOW && lastBtnModeState == HIGH) {  // Button pressed / Nút được nhấn
+    isAutoMode = !isAutoMode;          // Toggle mode / Chuyển đổi chế độ
+    servoLR.write(LR_STOP);            // Stop servo / Dừng servo
+    delay(200);                        // Debounce / Chống rung
   }
-  lastBtnModeState = btnModeState;    // Updates the stored button state for next loop iteration
+  lastBtnModeState = btnModeState;
 
-  // --- 2. Execute Mode Logic ---
-  if (isAutoMode) {                   // Checks if the system is in Automatic mode
-    runAutomaticMode();               // Calls the function to execute automatic solar tracking logic
-  } else {                            // Otherwise, the system is in Manual mode
-    runManualMode();                  // Calls the function to execute manual control logic
+  // --- 2. Run Current Mode ---
+  // --- 2. Chạy chế độ hiện tại ---
+  if (isAutoMode) {
+    runAutomaticMode();                // Auto tracking / Theo dõi tự động
+  } else {
+    runManualMode();                   // Manual control / Điều khiển thủ công
   }
 
-  // --- 3. Data Logging to Excel ---
-  logDataToExcel();                   // Calls the function to send voltage, current, and power data to Excel
+  // --- 3. Log Data ---
+  // --- 3. Ghi dữ liệu ---
+  logDataToExcel();                    // Send data to Excel / Gửi dữ liệu đến Excel
   
-  delay(50);                          // Waits 50 milliseconds before the next loop iteration (controls update rate)
+  delay(50);                           // Loop delay / Trễ vòng lặp
 }
 
-// --- Automatic Mode Logic based on Flowchart ---
-void runAutomaticMode() {             // Function that implements automatic solar tracking based on LDR readings
-  // 1. Read the analog value from each LDR sensor
-  int topleft = analogRead(LDR_TL_PIN);   // Reads analog value (0-1023) from the Top-Left LDR sensor
-  int topright = analogRead(LDR_TR_PIN);  // Reads analog value (0-1023) from the Top-Right LDR sensor
-  int botleft = analogRead(LDR_BL_PIN);   // Reads analog value (0-1023) from the Bottom-Left LDR sensor
-  int botright = analogRead(LDR_BR_PIN);  // Reads analog value (0-1023) from the Bottom-Right LDR sensor
+// --- Automatic Mode ---
+// --- Chế độ tự động ---
+void runAutomaticMode() {
+  // 1. Read LDR sensors / Đọc cảm biến LDR
+  int topleft = analogRead(LDR_TL_PIN);
+  int topright = analogRead(LDR_TR_PIN);
+  int botleft = analogRead(LDR_BL_PIN);
+  int botright = analogRead(LDR_BR_PIN);
 
-  // 2. Calculate the average values
-  int avgtop = (topright + topleft) / 2;    // Calculates the average light intensity of the top two LDRs
-  int avgbot = (botright + botleft) / 2;    // Calculates the average light intensity of the bottom two LDRs
-  int avgright = (topright + botright) / 2; // Calculates the average light intensity of the right two LDRs
-  int avgleft = (topleft + botleft) / 2;    // Calculates the average light intensity of the left two LDRs
+  // 2. Calculate averages / Tính giá trị trung bình
+  int avgtop = (topright + topleft) / 2;
+  int avgbot = (botright + botleft) / 2;
+  int avgright = (topright + botright) / 2;
+  int avgleft = (topleft + botleft) / 2;
 
-  // 3. Calculate the differences (Azimuth & elevation)
-  int diffelev = avgtop - avgbot;           // Calculates elevation difference (positive = more light on top)
-  int diffazi = avgright - avgleft;         // Calculates azimuth difference (positive = more light on right)
-  int avgsum = (avgtop + avgbot + avgright + avgleft) / 4;  // Calculates overall average light intensity
+  // 3. Calculate differences / Tính độ chênh lệch
+  int diffelev = avgtop - avgbot;          // Elevation diff (+top brighter) / Chênh cao độ (+trên sáng hơn)
+  int diffazi = avgright - avgleft;        // Azimuth diff (+right brighter) / Chênh phương vị (+phải sáng hơn)
+  int avgsum = (avgtop + avgbot + avgright + avgleft) / 4;
 
-  // 4. Check Night Mode (avgsum < 8)
-  if (avgsum < NIGHT_LIMIT) {               // Checks if average light is below night threshold (too dark)
-    // "Rotate the Servo Motors to the initial position"
-    servoLR.write(LR_STOP);                 // Stops the LR servo during night mode
-    posUD = 30;                             // Sets UD position to 30 degrees (facing east for sunrise)
-    servoUD.write(posUD);                   // Moves the UD servo to the sunrise/horizon position
-    return;                                 // Exits the function early, skipping the rest of the tracking logic
+  // 4. Night mode check / Kiểm tra chế độ đêm
+  if (avgsum < NIGHT_LIMIT) {              // Too dark / Quá tối
+    servoLR.write(LR_STOP);                // Stop LR / Dừng LR
+    posUD = 30;                            // Face east for sunrise / Hướng đông đón bình minh
+    servoUD.write(posUD);
+    return;
   }
 
-  // 5. Azimuth (Left-Right) Control
-  // Check |diffazi| <= 10
-  if (abs(diffazi) <= TOLERANCE) {          // Checks if the left-right light difference is within tolerance
-    // "Stop the Left-Right Servo Motor"
-    servoLR.write(LR_STOP);                 // Stops the LR servo (panel is aligned horizontally with sun)
+  // 5. Azimuth (Left-Right) control / Điều khiển phương vị (Trái-Phải)
+  if (abs(diffazi) <= TOLERANCE) {         // Within tolerance / Trong ngưỡng
+    servoLR.write(LR_STOP);                // Stop (aligned) / Dừng (đã căn chỉnh)
   } 
-  else {                                    // The difference exceeds tolerance, servo needs to move
-    // Check diffazi > 0
-    if (diffazi > 0) {                      // If positive, more light is on the right side
-      // "Left-Right Servo Motor move PV panel Right"
-      servoLR.write(LR_SPEED_RIGHT);        // Rotates the LR servo to move the panel toward the right
-    } else {                                // If negative, more light is on the left side
-      // "Left-Right Servo Motor move PV panel Left"
-      servoLR.write(LR_SPEED_LEFT);         // Rotates the LR servo to move the panel toward the left
+  else {                                   // Need adjustment / Cần điều chỉnh
+    if (diffazi > 0) {                     // Brighter on right / Sáng hơn bên phải
+      servoLR.write(LR_SPEED_RIGHT);       // Move right / Di chuyển sang phải
+    } else {                               // Brighter on left / Sáng hơn bên trái
+      servoLR.write(LR_SPEED_LEFT);        // Move left / Di chuyển sang trái
     }
   }
 
-  // 6. Elevation (Up-Down) Control
-  // Check |diffelev| <= 10
-  if (abs(diffelev) <= TOLERANCE) {          // Checks if the top-bottom light difference is within tolerance
-    // "Stop the Up-Down Servo Motor"
-    // Do nothing (position doesn't change)  // Panel is aligned vertically with sun, no adjustment needed
+  // 6. Elevation (Up-Down) control / Điều khiển cao độ (Lên-Xuống)
+  if (abs(diffelev) <= TOLERANCE) {        // Within tolerance / Trong ngưỡng
+    // No change (aligned) / Không thay đổi (đã căn chỉnh)
   } 
-  else {                                     // The difference exceeds tolerance, servo needs to move
-    // Check diffelev > 0
-    if (diffelev > 0) {                      // If positive, more light is on the top
-      // "Up-Down Servo Motor move PV panel Up"
-      posUD = posUD + 1;                     // Increments the UD position by 1 degree to tilt panel up
-    } else {                                 // If negative, more light is on the bottom
-      // "Up-Down Servo Motor move PV panel Down"
-      posUD = posUD - 1;                     // Decrements the UD position by 1 degree to tilt panel down
+  else {                                   // Need adjustment / Cần điều chỉnh
+    if (diffelev > 0) {                    // Brighter on top / Sáng hơn ở trên
+      posUD = posUD + 1;                   // Tilt up / Nghiêng lên
+    } else {                               // Brighter on bottom / Sáng hơn ở dưới
+      posUD = posUD - 1;                   // Tilt down / Nghiêng xuống
     }
-    // Write the new position for the standard servo
-    posUD = constrain(posUD, 0, 180);        // Constrains posUD value to valid servo range (0 to 180 degrees)
-    servoUD.write(posUD);                    // Sends the new position to the UD servo to move it
-  }
-  // The logic then goes back to Start       // After completing, the loop() will call this function again
-}
-
-// --- Manual Mode Logic ---
-void runManualMode() {                                      // Function that allows manual control of servos using a potentiometer
-  int btnAxisState = digitalRead(BTN_AXIS_PIN);             // Reads the current state of the axis selection button
-  if (btnAxisState == LOW && lastBtnAxisState == HIGH) {    // Checks if button was just pressed (falling edge)
-    manualControlLR = !manualControlLR;                     // Toggles between controlling LR servo and UD servo
-    servoLR.write(LR_STOP);                                // Stops the LR servo for safety when switching axis control
-    delay(200);                                             // Waits 200ms for button debouncing
-  }
-  lastBtnAxisState = btnAxisState;          // Updates the stored button state for next loop iteration
-
-  int potVal = analogRead(POT_PIN);         // Reads the analog value (0-1023) from the potentiometer
-  int angle = map(potVal, 0, 1023, 0, 180); // Maps the potentiometer value to a servo angle (0 to 180 degrees)
-
-  if (manualControlLR) {                    // Checks if currently controlling the LR servo
-    // Potentiometer controls speed/direction of continuous servo
-    servoLR.write(angle);                   // Sets LR servo speed/direction based on potentiometer (90=stop)
-  } else {                                  // Otherwise, controlling the UD servo
-    // Potentiometer controls position of standard servo
-    servoUD.write(angle);                   // Sets UD servo position based on potentiometer value
-    posUD = angle;                          // Updates the posUD variable to track current UD position
+    posUD = constrain(posUD, 0, 180);      // Limit to 0-180° / Giới hạn 0-180°
+    servoUD.write(posUD);
   }
 }
 
-// --- Data Logging Logic ---
-void logDataToExcel() {                                   // Function that calculates and sends power data to Excel via serial
-  float sensorValue = analogRead(VOLT_PIN);               // Reads the analog value (0-1023) from the voltage sensor pin
-  float voltage = sensorValue * (5.0 / 1023.0);           // Converts analog reading to voltage (assumes 5V reference)
-  float current = (voltage / LOAD_RESISTANCE) * 1000;     // Calculates current in milliamps using Ohm's law (I=V/R)
-  float power = voltage * current;                        // Calculates power in milliwatts (P = V × I)
+// --- Manual Mode ---
+// --- Chế độ thủ công ---
+void runManualMode() {
+  int btnAxisState = digitalRead(BTN_AXIS_PIN);
+  if (btnAxisState == LOW && lastBtnAxisState == HIGH) {  // Button pressed / Nút được nhấn
+    manualControlLR = !manualControlLR;      // Toggle axis / Chuyển trục
+    servoLR.write(LR_STOP);                  // Stop servo / Dừng servo
+    delay(200);                              // Debounce / Chống rung
+  }
+  lastBtnAxisState = btnAxisState;
 
-  Serial.print("DATA,TIME,");               // Sends data prefix and TIME keyword (PLX-DAQ inserts timestamp)
-  if (isAutoMode) Serial.print("Auto");     // If in Auto mode, prints "Auto" to the serial output
-  else Serial.print("Manual");              // If in Manual mode, prints "Manual" to the serial output
-  Serial.print(",");                        // Prints a comma delimiter for CSV formatting
-  Serial.print(voltage);                    // Prints the calculated voltage value
-  Serial.print(",");                        // Prints a comma delimiter for CSV formatting
-  Serial.print(current);                    // Prints the calculated current value in milliamps
-  Serial.print(",");                        // Prints a comma delimiter for CSV formatting
-  Serial.println(power);                    // Prints the calculated power value and ends the line
+  int potVal = analogRead(POT_PIN);          // Read potentiometer / Đọc biến trở
+  int angle = map(potVal, 0, 1023, 0, 180);  // Map to 0-180° / Ánh xạ 0-180°
+
+  if (manualControlLR) {                     // Control LR servo / Điều khiển servo LR
+    servoLR.write(angle);                    // Set speed/direction / Đặt tốc độ/hướng
+  } else {                                   // Control UD servo / Điều khiển servo UD
+    servoUD.write(angle);                    // Set position / Đặt vị trí
+    posUD = angle;
+  }
+}
+
+
+// PHẦN ĐÃ BỊ LƯỢC BỎ
+
+
+// --- Data Logging ---
+// --- Ghi dữ liệu ---
+void logDataToExcel() {
+  float sensorValue = analogRead(VOLT_PIN);
+  float voltage = sensorValue * (5.0 / 1023.0);  // Convert to volts / Chuyển đổi sang volt
+  float current = (voltage / LOAD_RESISTANCE) * 1000;  // Current (mA) / Dòng điện (mA)
+  float power = voltage * current;             // Power (mW) / Công suất (mW)
+
+  Serial.print("DATA,TIME,");                  // PLX-DAQ format / Định dạng PLX-DAQ
+  if (isAutoMode) Serial.print("Auto");
+  else Serial.print("Manual");
+  Serial.print(",");
+  Serial.print(voltage);
+  Serial.print(",");
+  Serial.print(current);
+  Serial.print(",");
+  Serial.println(power);
 }
